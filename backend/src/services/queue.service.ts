@@ -1,5 +1,5 @@
 import { Queue, Worker, Job } from 'bullmq';
-import { redis } from '../config/redis';
+import { redis, bullConnection } from '../config/redis';
 import { config } from '../config';
 import { executorService } from './executor.service';
 import { rateLimitService } from './rate-limit.service';
@@ -12,7 +12,7 @@ const log = createContextLogger('queue');
 
 // Engagement execution queue
 export const engagementQueue = new Queue('engagement-execution', {
-  connection: redis,
+  connection: bullConnection,
   defaultJobOptions: {
     attempts: config.worker.maxRetries,
     backoff: {
@@ -26,7 +26,7 @@ export const engagementQueue = new Queue('engagement-execution', {
 
 // Scheduled engagement queue
 export const scheduledQueue = new Queue('engagement-scheduled', {
-  connection: redis,
+  connection: bullConnection,
 });
 
 /**
@@ -264,7 +264,7 @@ export function createEngagementWorker(): Worker {
       return result;
     },
     {
-      connection: redis,
+      connection: bullConnection,
       concurrency: config.worker.concurrency,
       limiter: {
         max: 100,
@@ -303,7 +303,7 @@ export function createScheduledWorker(): Worker {
       await enqueueEngagement(engagementId);
     },
     {
-      connection: redis,
+      connection: bullConnection,
       concurrency: 2,
     }
   );

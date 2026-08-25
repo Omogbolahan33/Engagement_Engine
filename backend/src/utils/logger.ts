@@ -1,17 +1,34 @@
 import winston from 'winston';
 import { config } from '../config';
 
+/**
+ * An Error's `message` and `stack` are non-enumerable, so JSON.stringify renders
+ * a caught error as `{}` — which is how a fatal worker startup failure logged as
+ * `{"error":{}}` and told us nothing. Unwrap Errors explicitly.
+ */
+function errorReplacer(_key: string, value: unknown) {
+  if (value instanceof Error) {
+    return {
+      message: value.message,
+      name: value.name,
+      stack: value.stack,
+      ...(value as unknown as Record<string, unknown>),
+    };
+  }
+  return value;
+}
+
 const logFormat = winston.format.combine(
   winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
   winston.format.errors({ stack: true }),
-  winston.format.json()
+  winston.format.json({ replacer: errorReplacer })
 );
 
 const consoleFormat = winston.format.combine(
   winston.format.colorize(),
   winston.format.timestamp({ format: 'HH:mm:ss' }),
   winston.format.printf(({ timestamp, level, message, ...meta }) => {
-    const metaStr = Object.keys(meta).length ? ` ${JSON.stringify(meta)}` : '';
+    const metaStr = Object.keys(meta).length ? ` ${JSON.stringify(meta, errorReplacer)}` : '';
     return `${timestamp} [${level}] ${message}${metaStr}`;
   })
 );

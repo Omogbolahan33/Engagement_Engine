@@ -476,12 +476,17 @@ export class ExecutorService {
       }
 
       const response = await safeFetch(url, fetchOptions);
-      let data: any;
 
+      // Read the body exactly once. Calling .json() first and falling back to
+      // .text() cannot work: .json() consumes the stream even when it throws,
+      // so the fallback always failed with "Body has already been read" — which
+      // turned every non-JSON response into an error.
+      const raw = await response.text();
+      let data: any;
       try {
-        data = await response.json();
+        data = raw ? JSON.parse(raw) : null;
       } catch {
-        data = await response.text();
+        data = raw;
       }
 
       // Capture response headers

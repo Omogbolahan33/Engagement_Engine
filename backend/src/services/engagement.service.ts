@@ -65,14 +65,17 @@ export class EngagementService {
         config: input.config || {},
         targetConfig: input.targetConfig,
         schedule: input.schedule || {},
+        // `??` rather than `||`: 0 is a meaningful value here (no cooldown, no
+        // jitter, or a deliberately zero limit) and `||` silently replaced it
+        // with the default, making those settings impossible to express.
         frequency: {
-          maxPerMinute: input.frequency?.maxPerMinute || 1,
-          maxPerHour: input.frequency?.maxPerHour || 10,
-          maxPerDay: input.frequency?.maxPerDay || 100,
-          maxPerWeek: input.frequency?.maxPerWeek || 500,
+          maxPerMinute: input.frequency?.maxPerMinute ?? 1,
+          maxPerHour: input.frequency?.maxPerHour ?? 10,
+          maxPerDay: input.frequency?.maxPerDay ?? 100,
+          maxPerWeek: input.frequency?.maxPerWeek ?? 500,
           maxTotal: input.frequency?.maxTotal,
-          cooldownMs: input.frequency?.cooldownMs || 60000,
-          jitterMs: input.frequency?.jitterMs || 5000,
+          cooldownMs: input.frequency?.cooldownMs ?? 60000,
+          jitterMs: input.frequency?.jitterMs ?? 5000,
           backoffStrategy: (input.frequency?.backoffStrategy as any) || 'LINEAR',
         },
         expiresAt: input.expiresAt,
