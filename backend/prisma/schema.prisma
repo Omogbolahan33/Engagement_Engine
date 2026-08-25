@@ -1,0 +1,729 @@
+// Engagement Platform - Production SaaS Schema
+// Multi-tenant engagement automation platform
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// TENANT & AUTHENTICATION
+// ============================================================
+
+model Organization {
+  id            String   @id @default(uuid())
+  name          String
+  slug          String   @unique
+  plan          Plan     @default(FREE)
+  settings      Json     @default("{}")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  users         User[]
+  sites         Site[]
+  apiKeys       ApiKey[]
+  webhooks      Webhook[]
+  auditLogs     AuditLog[]
+  llmConfigs    LLMConfig[]
+  templates     ContentTemplate[]
+
+  @@map("organizations")
+}
+
+enum Plan {
+  FREE
+  STARTER
+  PROFESSIONAL
+  ENTERPRISE
+}
+
+model User {
+  id              String    @id @default(uuid())
+  organizationId  String
+  email           String    @unique
+  passwordHash    String
+  firstName       String?
+  lastName        String?
+  role            UserRole  @default(MEMBER)
+  isActive        Boolean   @default(true)
+  lastLoginAt     DateTime?
+  mfaEnabled      Boolean   @default(false)
+  mfaSecret       String?
+  // Hashed single-use backup codes: [{ code, used }]
+  mfaBackupCodes  Json      @default("[]")
+  mfaEnabledAt    DateTime?
+  preferences     Json      @default("{}")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  sessions        UserSession[]
+  auditLogs       AuditLog[]
+
+  @@index([organizationId])
+  @@map("users")
+}
+
+enum UserRole {
+  OWNER
+  ADMIN
+  MANAGER
+  MEMBER
+  VIEWER
+}
+
+model UserSession {
+  id          String    @id @default(uuid())
+  userId      String
+  token       String    @unique
+  ipAddress   String?
+  userAgent   String?
+  expiresAt   DateTime
+  createdAt   DateTime  @default(now())
+  lastActiveAt DateTime @default(now())
+  revokedAt   DateTime?
+
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@index([userId, revokedAt])
+  @@map("user_sessions")
+}
+
+model ApiKey {
+  id              String    @id @default(uuid())
+  organizationId  String
+  name            String
+  keyHash         String    @unique
+  keyPrefix       String
+  permissions     Json      @default("[]")
+  rateLimit       Int       @default(1000)
+  expiresAt       DateTime?
+  lastUsedAt      DateTime?
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("api_keys")
+}
+
+// ============================================================
+// SITES & PLATFORM CONFIGURATION
+// ============================================================
+
+model Site {
+  id              String    @id @default(uuid())
+  organizationId  String
+  name            String
+  url             String
+  platform        PlatformType
+  description     String?
+  isActive        Boolean   @default(true)
+  settings        Json      @default("{}")
+  rateLimits      Json      @default("{}")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  credentials     Credential[]
+  engagements     Engagement[]
+  engagementRuns  EngagementRun[]
+  proxyConfigs    ProxyConfig[]
+
+  @@index([organizationId])
+  @@index([platform])
+  @@index([organizationId, isActive])
+  @@map("sites")
+}
+
+enum PlatformType {
+  // Social Media
+  TWITTER
+  FACEBOOK
+  INSTAGRAM
+  LINKEDIN
+  REDDIT
+  TIKTOK
+  YOUTUBE
+  PINTEREST
+  THREADS
+  MASTODON
+  BLUESKY
+
+  // Forums & Communities
+  DISCOURSE
+  PHPBB
+  VBBULLETIN
+  NODEBB
+  FLARUM
+  NAIRALAND
+  VOAT
+  LEMMY
+  MINDS
+  STEEMIT
+  FOURCHAN
+  QUORA
+  STACKOVERFLOW
+
+  // Content & Blogging
+  WORDPRESS
+  MEDIUM
+  SUBSTACK
+  GHOST
+  DEVTO
+  HASHNODE
+  BLOGGER
+  TUMBLR
+
+  // Review Sites
+  TRUSTPILOT
+  GLASSDOOR
+  YELP
+  G2
+  CAPTERRA
+  PRODUCTHUNT
+
+  // E-commerce
+  AMAZON
+  EBAY
+  SHOPIFY
+  ETSY
+  ALIEXPRESS
+
+  // News & Discussion
+  HACKERNEWS
+  SLASHDOT
+  DIGG
+  VOX
+  REDDIT_NEWS
+
+  // Messaging & Chat
+  DISCORD
+  SLACK
+  TELEGRAM
+  WHATSAPP
+  SIGNAL
+
+  // Regional / Niche
+  WEIBO
+  VK
+  OK_RU
+  LINE
+  KAKAOTALK
+
+  // Custom / Generic
+  CUSTOM_API
+  CUSTOM_BROWSER
+  CUSTOM_WEBHOOK
+}
+
+// ============================================================
+// CREDENTIALS & AUTHENTICATION
+// ============================================================
+
+model Credential {
+  id              String    @id @default(uuid())
+  siteId          String
+  name            String
+  authType        AuthType
+  // Encrypted credential data - NEVER stored in plaintext
+  encryptedData   String
+  // Which encryption key version encryptedData is wrapped with
+  keyVersion      Int       @default(1)
+  // Metadata (non-sensitive) for display
+  metadata        Json      @default("{}")
+  isActive        Boolean   @default(true)
+  expiresAt       DateTime?
+  lastUsedAt      DateTime?
+  lastRefreshAt   DateTime?
+  refreshStrategy RefreshStrategy?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  site            Site      @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  engagementRuns  EngagementRun[]
+
+  @@index([siteId])
+  @@index([authType])
+  @@map("credentials")
+}
+
+enum AuthType {
+  // Token-based
+  API_KEY
+  BEARER_TOKEN
+  SESSION_TOKEN
+  JWT_TOKEN
+  OAUTH2_CLIENT_CREDENTIALS
+  OAUTH2_AUTHORIZATION_CODE
+  OAUTH2_DEVICE_CODE
+  PERSONAL_ACCESS_TOKEN
+
+  // Username/Password
+  BASIC_AUTH
+  FORM_LOGIN
+  DIGEST_AUTH
+  NTLM_AUTH
+  KERBEROS
+
+  // Cookie/Session
+  COOKIE_AUTH
+  SESSION_COOKIE
+  CSRF_TOKEN_PLUS_SESSION
+
+  // Header-based
+  CUSTOM_HEADER
+  HMAC_SIGNATURE
+  REQUEST_SIGNING
+
+  // Certificate/Mutual TLS
+  MTLS_CERTIFICATE
+  CLIENT_CERTIFICATE
+
+  // Platform-Specific
+  TWITTER_OAUTH1
+  TWITTER_OAUTH2
+  GOOGLE_OAUTH2
+  FACEBOOK_LOGIN
+  GITHUB_APP
+  SLACK_BOT_TOKEN
+  DISCORD_BOT_TOKEN
+  REDDIT_OAUTH2
+  LINKEDIN_OAUTH2
+
+  // Browser-based
+  PUPPETEER_LOGIN
+  SELENIUM_LOGIN
+  BROWSER_COOKIE_IMPORT
+
+  // Webhook/Event
+  WEBHOOK_SECRET
+  HMAC_WEBHOOK
+
+  // SSO
+  SAML_SSO
+  OIDC_SSO
+  LDAP_AUTH
+
+  // Custom
+  CUSTOM_SCRIPT
+  MULTI_STEP_AUTH
+}
+
+enum RefreshStrategy {
+  NONE
+  AUTO_REFRESH
+  REFRESH_BEFORE_EXPIRY
+  REAUTH_ON_FAILURE
+  ROTATE_TOKENS
+  OAUTH2_REFRESH_TOKEN
+}
+
+// ============================================================
+// ENGAGEMENTS & EXECUTION
+// ============================================================
+
+model Engagement {
+  id              String    @id @default(uuid())
+  siteId          String
+  name            String
+  description     String?
+  engagementType  EngagementType
+  // Configuration for this engagement
+  config          Json      @default("{}")
+  // Target configuration (URLs, post IDs, etc.)
+  targetConfig    Json      @default("{}")
+  // Scheduling
+  schedule        Json      @default("{}")
+  // Frequency & Limits
+  frequency       Json      @default("{\"maxPerMinute\":1,\"maxPerHour\":10,\"maxPerDay\":100,\"maxPerWeek\":500,\"cooldownMs\":60000,\"jitterMs\":5000,\"backoffStrategy\":\"LINEAR\"}")
+  // Expiry
+  expiresAt       DateTime?
+  // Status
+  status          EngagementStatus @default(DRAFT)
+  priority        Int       @default(5)
+  // Retry configuration
+  retryConfig     Json      @default("{}")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  site            Site      @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  runs            EngagementRun[]
+  logs            EngagementLog[]
+
+  @@index([siteId])
+  @@index([engagementType])
+  @@index([status])
+  @@index([siteId, status])
+  @@index([status, createdAt])
+  @@map("engagements")
+}
+
+enum EngagementType {
+  // Reactions
+  LIKE
+  DISLIKE
+  UPVOTE
+  DOWNVOTE
+  LOVE
+  HAHA
+  WOW
+  SAD
+  ANGRY
+  REACT_EMOJI
+
+  // Content Creation
+  CREATE_POST
+  CREATE_COMMENT
+  REPLY_TO_COMMENT
+  CREATE_THREAD
+  CREATE_REVIEW
+  CREATE_ARTICLE
+  CREATE_POLL
+
+  // Content Interaction
+  SHARE_POST
+  RETWEET
+  REPOST
+  QUOTE_POST
+  BOOKMARK
+  SAVE_POST
+  PIN_POST
+
+  // Following/Social
+  FOLLOW_USER
+  UNFOLLOW_USER
+  FOLLOW_TOPIC
+  JOIN_GROUP
+  LEAVE_GROUP
+  SUBSCRIBE_CHANNEL
+  UNSUBSCRIBE_CHANNEL
+
+  // Account Actions
+  CREATE_ACCOUNT
+  UPDATE_PROFILE
+  UPDATE_AVATAR
+  UPDATE_BIO
+  VERIFY_EMAIL
+
+  // Moderation
+  FLAG_CONTENT
+  REPORT_CONTENT
+  BLOCK_USER
+  MUTE_USER
+
+  // Messaging
+  SEND_MESSAGE
+  SEND_DM
+  SEND_INVITE
+
+  // Analytics/Scraping
+  SCRAPE_CONTENT
+  SCRAPE_USER_DATA
+  SCRAPE_ANALYTICS
+  MONITOR_MENTIONS
+
+  // Custom
+  CUSTOM_ACTION
+  MULTI_STEP_ACTION
+  WORKFLOW
+}
+
+enum EngagementStatus {
+  DRAFT
+  SCHEDULED
+  ACTIVE
+  PAUSED
+  COMPLETED
+  FAILED
+  EXPIRED
+  ARCHIVED
+}
+
+enum BackoffStrategy {
+  NONE
+  LINEAR
+  EXPONENTIAL
+  FIBONACCI
+}
+
+model EngagementRun {
+  id              String    @id @default(uuid())
+  engagementId    String
+  siteId          String
+  credentialId    String?
+  status          RunStatus @default(PENDING)
+  startedAt       DateTime?
+  completedAt     DateTime?
+  result          Json?
+  errorMessage    String?
+  retryCount      Int       @default(0)
+  nextRetryAt     DateTime?
+  metadata        Json      @default("{}")
+  createdAt       DateTime  @default(now())
+
+  engagement      Engagement @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+  site            Site       @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  credential      Credential? @relation(fields: [credentialId], references: [id], onDelete: SetNull)
+  logs            EngagementLog[]
+
+  @@index([engagementId])
+  @@index([siteId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([siteId, status])
+  @@index([siteId, createdAt])
+  @@index([engagementId, status])
+  @@index([engagementId, createdAt])
+  @@map("engagement_runs")
+}
+
+enum RunStatus {
+  PENDING
+  QUEUED
+  RUNNING
+  SUCCESS
+  FAILED
+  RETRYING
+  CANCELLED
+  TIMEOUT
+  RATE_LIMITED
+  AUTH_EXPIRED
+  BLOCKED
+}
+
+model EngagementLog {
+  id              String    @id @default(uuid())
+  engagementId    String
+  runId           String?
+  level           LogLevel  @default(INFO)
+  message         String
+  data            Json?
+  createdAt       DateTime  @default(now())
+
+  engagement      Engagement @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+  run             EngagementRun? @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([engagementId])
+  @@index([runId])
+  @@index([level])
+  @@index([createdAt])
+  @@index([engagementId, createdAt])
+  @@map("engagement_logs")
+}
+
+enum LogLevel {
+  DEBUG
+  INFO
+  WARN
+  ERROR
+  FATAL
+}
+
+// ============================================================
+// PROXY & RATE LIMITING
+// ============================================================
+
+model ProxyConfig {
+  id              String    @id @default(uuid())
+  siteId          String
+  name            String
+  proxyType       ProxyType
+  host            String
+  port            Int
+  username        String?
+  encryptedPassword String?
+  isActive        Boolean   @default(true)
+  maxConcurrent   Int       @default(5)
+  currentLoad     Int       @default(0)
+  lastUsedAt      DateTime?
+  metadata        Json      @default("{}")
+  createdAt       DateTime  @default(now())
+
+  site            Site      @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@index([siteId])
+  @@map("proxy_configs")
+}
+
+enum ProxyType {
+  HTTP
+  HTTPS
+  SOCKS4
+  SOCKS5
+  RESIDENTIAL
+  MOBILE
+  DATACENTER
+}
+
+// ============================================================
+// ANALYTICS & REPORTING
+// ============================================================
+
+model AnalyticsSnapshot {
+  id              String    @id @default(uuid())
+  organizationId  String
+  siteId          String?
+  date            DateTime
+  metric          String
+  value           Float
+  dimensions      Json      @default("{}")
+  createdAt       DateTime  @default(now())
+
+  @@index([organizationId, date])
+  @@index([siteId, metric])
+  @@unique([organizationId, siteId, date, metric])
+  @@map("analytics_snapshots")
+}
+
+// ============================================================
+// WEBHOOKS & NOTIFICATIONS
+// ============================================================
+
+model Webhook {
+  id              String    @id @default(uuid())
+  organizationId  String
+  url             String
+  events          String[]
+  encryptedSecret String?
+  isActive        Boolean   @default(true)
+  lastTriggeredAt DateTime?
+  failureCount    Int       @default(0)
+  createdAt       DateTime  @default(now())
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  deliveries      WebhookDelivery[]
+
+  @@index([organizationId])
+  @@map("webhooks")
+}
+
+model WebhookDelivery {
+  id              String    @id @default(uuid())
+  webhookId       String
+  event           String
+  payload         Json
+  attempt         Int       @default(0)
+  maxAttempts     Int       @default(6)
+  status          DeliveryStatus @default(PENDING)
+  statusCode      Int?
+  error           String?
+  nextAttemptAt   DateTime?
+  deliveredAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  webhook         Webhook   @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@index([webhookId])
+  @@index([status, nextAttemptAt])
+  @@map("webhook_deliveries")
+}
+
+enum DeliveryStatus {
+  PENDING
+  RETRYING
+  DELIVERED
+  FAILED
+}
+
+// ============================================================
+// AI / LLM CONFIGURATION
+// ============================================================
+
+model LLMConfig {
+  id              String    @id @default(uuid())
+  organizationId  String
+  name            String
+  provider        String    // openai, anthropic, google, mistral, groq, ollama, etc.
+  model           String
+  encryptedApiKey String?   // Encrypted API key
+  baseUrl         String?   // Custom base URL for self-hosted/proxy
+  maxTokens       Int       @default(500)
+  temperature     Float     @default(0.7)
+  topP            Float?
+  frequencyPenalty Float?
+  presencePenalty Float?
+  systemPrompt    String?   // Default system prompt
+  timeout         Int       @default(60000)
+  // Azure-specific
+  azureEndpoint   String?
+  azureApiVersion String?
+  // Rate limiting
+  requestsPerMinute Int?
+  tokensPerMinute   Int?
+  // Scoping — which engagement types this config can be used for
+  allowedScopes   String[]  @default([]) // comments, replies, posts, messages, etc.
+  isActive        Boolean   @default(true)
+  lastTestedAt    DateTime?
+  lastTestResult  Json?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  contentTemplates ContentTemplate[]
+
+  @@index([organizationId])
+  @@map("llm_configs")
+}
+
+model ContentTemplate {
+  id              String    @id @default(uuid())
+  organizationId  String
+  name            String
+  description     String?
+  content         String    // Template text with {variables}
+  category        String?   // comments, posts, messages, etc.
+  language        String    @default("English")
+  // Variable definitions for the template
+  variables       Json      @default("[]") // [{name, description, defaultValue, required}]
+  // Usage tracking
+  useCount        Int       @default(0)
+  lastUsedAt      DateTime?
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  llmConfig       LLMConfig?  @relation(fields: [llmConfigId], references: [id], onDelete: SetNull)
+  llmConfigId     String?
+
+  @@index([organizationId])
+  @@index([category])
+  @@map("content_templates")
+}
+
+// ============================================================
+// AUDIT & COMPLIANCE
+// ============================================================
+
+model AuditLog {
+  id              String    @id @default(uuid())
+  organizationId  String
+  userId          String?
+  action          String
+  resource        String
+  resourceId      String?
+  details         Json?
+  ipAddress       String?
+  userAgent       String?
+  createdAt       DateTime  @default(now())
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user            User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@index([organizationId, createdAt])
+  @@index([organizationId, action])
+  @@map("audit_logs")
+}
