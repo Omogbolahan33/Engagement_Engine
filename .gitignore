@@ -37,7 +37,9 @@ coverage/
 docker/ssl/
 
 # Prisma
-backend/prisma/migrations/
+# NOTE: migrations are intentionally tracked. docker/Dockerfile.backend runs
+# `prisma migrate deploy` at container start, which applies the committed
+# migration history — ignoring it would leave production with an empty schema.
 
 # Temporary
 .openclaw/tmp/
